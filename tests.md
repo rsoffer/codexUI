@@ -39,6 +39,8 @@ This file tracks manual regression and feature verification steps.
 - Queued turns persist and replay with the selected `modelId` and `effort`.
 - A model preference refresh preserves the selected model when it is already in the available model list.
 - A user-selected reasoning effort is not overwritten by the server config on later refreshes.
+- Creating a new thread keeps the selected model even if `thread/start` reports a different server model.
+- Loading or resuming an existing thread keeps the selected model for the next turn instead of adopting stale server metadata.
 
 #### Rollback/Cleanup
 - Remove any queued test messages before leaving the thread.
