@@ -282,6 +282,8 @@ export type StoredQueuedMessage = {
   imageUrls: string[]
   skills: Array<{ name: string; path: string }>
   fileAttachments: Array<{ label: string; path: string; fsPath: string }>
+  modelId: string
+  effort: ReasoningEffort | ''
   collaborationMode: CollaborationModeKind
 }
 
@@ -2263,6 +2265,8 @@ function normalizeStoredQueuedMessage(value: unknown): StoredQueuedMessage | nul
     imageUrls,
     skills,
     fileAttachments,
+    modelId: typeof record.modelId === 'string' ? record.modelId.trim() : '',
+    effort: normalizeReasoningEffort(record.effort),
     collaborationMode: record.collaborationMode === 'plan' ? 'plan' : 'default',
   }
 }

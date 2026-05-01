@@ -1297,6 +1297,8 @@ export function useDesktopState() {
     imageUrls: string[]
     skills: Array<{ name: string; path: string }>
     fileAttachments: FileAttachment[]
+    modelId: string
+    effort: ReasoningEffort | ''
     collaborationMode: CollaborationModeKind
   }
   type PendingTurnRequest = {
@@ -1326,6 +1328,7 @@ export function useDesktopState() {
   )
   const selectedModelId = ref(readSelectedModel(selectedModelIdByContext.value, selectedThreadId.value))
   const selectedReasoningEffort = ref<ReasoningEffort | ''>('medium')
+  let hasUserSelectedReasoningEffort = false
   const selectedSpeedMode = ref<SpeedMode>('standard')
   const activeProviderId = ref('')
   const readStateByThreadId = ref<Record<string, string>>(loadReadStateMap())
@@ -1723,6 +1726,7 @@ export function useDesktopState() {
     if (effort && !REASONING_EFFORT_OPTIONS.includes(effort)) {
       return
     }
+    hasUserSelectedReasoningEffort = true
     selectedReasoningEffort.value = effort
   }
 
@@ -1796,8 +1800,8 @@ export function useDesktopState() {
       }
       availableModelIds.value = nextModelIds
 
-      const currentModelInNewList = normalizedSelectedModelId && modelIds.includes(normalizedSelectedModelId)
-      if (!normalizedSelectedModelId || !currentModelInNewList || options?.providerChanged) {
+      const currentModelInAvailableList = normalizedSelectedModelId && nextModelIds.includes(normalizedSelectedModelId)
+      if (!normalizedSelectedModelId || !currentModelInAvailableList || options?.providerChanged) {
         if (options?.providerChanged && nextModelIds.length > 0) {
           if (providerScopedModelId && nextModelIds.includes(providerScopedModelId)) {
             setSelectedModelId(providerScopedModelId)
@@ -1822,6 +1826,7 @@ export function useDesktopState() {
       }
 
       if (
+        !hasUserSelectedReasoningEffort &&
         currentConfig.reasoningEffort &&
         REASONING_EFFORT_OPTIONS.includes(currentConfig.reasoningEffort)
       ) {
@@ -3926,6 +3931,8 @@ export function useDesktopState() {
           path: attachment.path,
           fsPath: attachment.fsPath,
         })),
+        modelId: message.modelId,
+        effort: message.effort,
         collaborationMode: message.collaborationMode,
       }))
     }
@@ -4490,6 +4497,8 @@ export function useDesktopState() {
         imageUrls,
         skills,
         fileAttachments,
+        modelId: readModelIdForThread(threadId),
+        effort: selectedReasoningEffort.value,
         collaborationMode: collaborationModeOverride === 'plan'
           ? 'plan'
           : collaborationModeOverride === 'default'
@@ -4670,6 +4679,7 @@ export function useDesktopState() {
     const collaborationMode = collaborationModeOverride === 'plan' ? 'plan' : collaborationModeOverride === 'default'
       ? 'default'
       : selectedCollaborationMode.value
+    const modelIdBeforeResume = readModelIdForThread(threadId)
     const normalizedText = nextText.trim()
     const normalizedImageUrls = [...imageUrls]
     if (
@@ -4697,9 +4707,11 @@ export function useDesktopState() {
     try {
       if (resumedThreadById.value[threadId] !== true) {
         const resumedThread = await resumeThread(threadId)
-        setThreadModelId(threadId, resumedThread.model)
+        if (!modelIdBeforeResume) {
+          setThreadModelId(threadId, resumedThread.model)
+        }
       }
-      const modelId = readModelIdForThread(threadId)
+      const modelId = modelIdBeforeResume || readModelIdForThread(threadId)
 
       let startedTurnId = ''
       try {
