@@ -19,6 +19,30 @@ This file tracks manual regression and feature verification steps.
 #### Rollback/Cleanup
 - <cleanup action, if any>
 
+### Feature: Model and reasoning effort preservation
+
+#### Prerequisites
+- App is running from this repository.
+- At least one existing thread is available.
+- Model selector includes a non-default model such as `gpt-5.5`.
+
+#### Steps
+1. Select `gpt-5.5` and `medium` reasoning effort in the composer.
+2. Send a message in an existing thread that has not been resumed in the current browser session.
+3. While the thread is in progress, queue a second message with the same selected model and effort.
+4. Inspect the `turn/start` RPC payloads or app-server logs for the immediate and queued turns.
+5. Refresh model preferences by opening Settings or changing providers, then return to the thread.
+
+#### Expected Results
+- The resumed thread does not replace the selected composer model with the model returned by `thread/resume`.
+- Immediate `turn/start` payloads include the selected `model` and `effort`.
+- Queued turns persist and replay with the selected `modelId` and `effort`.
+- A model preference refresh preserves the selected model when it is already in the available model list.
+- A user-selected reasoning effort is not overwritten by the server config on later refreshes.
+
+#### Rollback/Cleanup
+- Remove any queued test messages before leaving the thread.
+
 ### Feature: Thread heartbeat automations
 
 #### Prerequisites

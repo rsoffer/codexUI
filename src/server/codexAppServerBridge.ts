@@ -3182,6 +3182,8 @@ type StoredQueuedMessage = {
   imageUrls: string[]
   skills: Array<{ name: string; path: string }>
   fileAttachments: Array<{ label: string; path: string; fsPath: string }>
+  modelId: string
+  effort: ReasoningEffort | ''
   collaborationMode: 'default' | 'plan'
 }
 
@@ -3233,6 +3235,8 @@ function normalizeStoredQueuedMessage(value: unknown): StoredQueuedMessage | nul
     imageUrls: normalizeStringArray(record.imageUrls),
     skills: normalizeNamedPathItems(record.skills),
     fileAttachments: normalizeFileAttachments(record.fileAttachments),
+    modelId: readNonEmptyString(record.modelId) ?? '',
+    effort: normalizeReasoningEffort(record.effort),
     collaborationMode: record.collaborationMode === 'plan' ? 'plan' : 'default',
   }
 }
@@ -4440,7 +4444,19 @@ class BackendQueueProcessor {
     })
   }
 
-  private async resolveCollaborationModeSettings(mode: CollaborationModeKind): Promise<ResolvedCollaborationModeSettings> {
+  private async resolveCollaborationModeSettings(
+    mode: CollaborationModeKind,
+    modelId: string = '',
+    effort: ReasoningEffort | '' = '',
+  ): Promise<ResolvedCollaborationModeSettings> {
+    const selectedModel = modelId.trim()
+    if (selectedModel) {
+      return {
+        model: selectedModel,
+        reasoningEffort: normalizeCollaborationModeReasoningEffort(effort),
+      }
+    }
+
     let currentConfig: Record<string, unknown> | null = null
     try {
       const configPayload = asRecord(await this.appServer.rpc('config/read', {}))
@@ -4517,12 +4533,22 @@ class BackendQueueProcessor {
       threadId: turn.threadId,
       input,
     }
+    if (turn.message.modelId) {
+      params.model = turn.message.modelId
+    }
+    if (turn.message.effort) {
+      params.effort = turn.message.effort
+    }
     if (dedupedFileAttachments.length > 0) {
       params.attachments = dedupedFileAttachments.map((f) => ({ label: f.label, path: f.path, fsPath: f.fsPath }))
     }
 
     try {
-      const settings = await this.resolveCollaborationModeSettings(turn.message.collaborationMode)
+      const settings = await this.resolveCollaborationModeSettings(
+        turn.message.collaborationMode,
+        turn.message.modelId,
+        turn.message.effort,
+      )
       params.collaborationMode = {
         mode: turn.message.collaborationMode,
         settings: {

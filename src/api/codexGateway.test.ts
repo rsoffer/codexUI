@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { listDirectoryComposioConnectors, startThreadTurn } from './codexGateway'
+import { getThreadQueueState, listDirectoryComposioConnectors, startThreadTurn } from './codexGateway'
 
 function mockRpcFetch(): { requests: Array<{ method: string, params: Record<string, unknown> }> } {
   const requests: Array<{ method: string, params: Record<string, unknown> }> = []
@@ -41,6 +41,8 @@ describe('startThreadTurn collaboration mode payloads', () => {
 
     expect(requests).toHaveLength(2)
     expect(requests[0].method).toBe('turn/start')
+    expect(requests[0].params.model).toBe('gpt-5.4')
+    expect(requests[0].params.effort).toBe('medium')
     expect(requests[0].params.collaborationMode).toEqual({
       mode: 'plan',
       settings: {
@@ -50,6 +52,8 @@ describe('startThreadTurn collaboration mode payloads', () => {
       },
     })
     expect(requests[1].method).toBe('turn/start')
+    expect(requests[1].params.model).toBe('gpt-5.4')
+    expect(requests[1].params.effort).toBe('medium')
     expect(requests[1].params.collaborationMode).toEqual({
       mode: 'default',
       settings: {
@@ -85,5 +89,79 @@ describe('listDirectoryComposioConnectors', () => {
     await listDirectoryComposioConnectors('instagram', '50', 25)
 
     expect(requests).toEqual(['/codex-api/composio/connectors?query=instagram&cursor=50&limit=25'])
+  })
+})
+
+describe('thread queue state', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('preserves queued turn model and reasoning effort when present', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: {
+        'thread-1': [{
+          id: 'queued-1',
+          text: 'continue',
+          imageUrls: [],
+          skills: [],
+          fileAttachments: [],
+          modelId: 'gpt-5.5',
+          effort: 'medium',
+          collaborationMode: 'default',
+        }],
+      },
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })))
+
+    await expect(getThreadQueueState()).resolves.toEqual({
+      'thread-1': [{
+        id: 'queued-1',
+        text: 'continue',
+        imageUrls: [],
+        skills: [],
+        fileAttachments: [],
+        modelId: 'gpt-5.5',
+        effort: 'medium',
+        collaborationMode: 'default',
+      }],
+    })
+  })
+
+  it('keeps legacy queued turns usable without model metadata', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: {
+        'thread-1': [{
+          id: 'queued-legacy',
+          text: 'continue',
+          imageUrls: [],
+          skills: [],
+          fileAttachments: [],
+          collaborationMode: 'plan',
+        }],
+      },
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })))
+
+    await expect(getThreadQueueState()).resolves.toEqual({
+      'thread-1': [{
+        id: 'queued-legacy',
+        text: 'continue',
+        imageUrls: [],
+        skills: [],
+        fileAttachments: [],
+        modelId: '',
+        effort: '',
+        collaborationMode: 'plan',
+      }],
+    })
   })
 })
