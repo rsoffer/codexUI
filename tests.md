@@ -90,7 +90,7 @@ This file tracks manual regression and feature verification steps.
 - Folder names are derived from the prompt using lowercase alphanumeric tokens, with suffixes for duplicates.
 - Projectless chat rows appear in the `Chats` section and do not create a separate project group from the generated folder name.
 - Short projectless prompts such as `hi` remain visible in `Chats` after the thread list refreshes and workspace-root filtering runs.
-- If the selected model returns `requires a newer version of Codex`, the turn retries with `gpt-5.4-mini` instead of leaving the new chat failed on 5.5.
+- If the selected model returns `requires a newer version of Codex`, the error is shown and the composer keeps the selected model instead of silently retrying with `gpt-5.4-mini`.
 - Light and dark theme composer surfaces remain readable and unchanged apart from the folder behavior.
 
 #### Rollback/Cleanup
@@ -575,7 +575,7 @@ Model, skill, thinking, and plan controls remain usable while a thread turn is i
 - Each thread restores its own last selected model when you switch threads.
 - The new-thread screen keeps its own draft model selection instead of inheriting the last opened thread.
 - After browser refresh, reopening a thread restores the model persisted for that thread.
-- Forked or newly created threads keep the resolved model returned by Codex, including fallback to the supported default model when needed.
+- Forked or newly created threads keep the user-selected model when present, even if Codex returns different thread metadata.
 - Forking a nonselected thread from the sidebar uses that source thread’s persisted model.
 - If the selected thread’s persisted model is not returned in the latest model list, the composer still shows that model as the active selection instead of falling back to the placeholder label.
 - Removing a thread prunes its saved per-thread model state, and model selection continues to update normally for the remaining threads without runtime errors.
