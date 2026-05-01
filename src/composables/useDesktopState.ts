@@ -89,7 +89,6 @@ const TURN_START_FOLLOW_UP_SYNC_DELAY_MS = 3000
 const RECENT_THREAD_MESSAGE_LOAD_REUSE_MS = 2000
 const REASONING_EFFORT_OPTIONS: ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
 const GLOBAL_SERVER_REQUEST_SCOPE = '__global__'
-const MODEL_FALLBACK_ID = 'gpt-5.4-mini'
 
 function loadReadStateMap(): Record<string, string> {
   if (typeof window === 'undefined') return {}
@@ -600,16 +599,6 @@ function arePlanDataEqual(first?: UiPlanData, second?: UiPlanData): boolean {
     first.explanation === second.explanation &&
     first.isStreaming === second.isStreaming &&
     arePlanStepsEqual(first.steps, second.steps)
-  )
-}
-
-function isUnsupportedChatGptModelError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false
-  const message = error.message.toLowerCase()
-  return (
-    message.includes('not supported when using codex with a chatgpt account') ||
-    message.includes('model is not supported') ||
-    message.includes('requires a newer version of codex')
   )
 }
 
@@ -1340,7 +1329,6 @@ export function useDesktopState() {
     fileAttachments: FileAttachment[]
     effort: ReasoningEffort | ''
     collaborationMode: CollaborationModeKind
-    fallbackRetried: boolean
   }
   const queuedMessagesByThreadId = ref<Record<string, QueuedMessage[]>>({})
   const queueProcessingByThreadId = ref<Record<string, boolean>>({})
@@ -1450,7 +1438,6 @@ export function useDesktopState() {
   let activeReasoningItemId = ''
   let shouldAutoScrollOnNextAgentEvent = false
   const pendingTurnStartsById = new Map<string, TurnStartedInfo>()
-  const fallbackRetryInFlightThreadIds = new Set<string>()
 
 
   const allThreads = computed(() => flattenThreads(projectGroups.value))
@@ -1663,15 +1650,6 @@ export function useDesktopState() {
     codexRateLimit.value = nextSnapshot
   }
 
-  async function applyFallbackModelSelection(threadId: string = selectedThreadId.value): Promise<void> {
-    if (threadId.trim()) {
-      setThreadModelId(threadId, MODEL_FALLBACK_ID)
-    } else {
-      setSelectedModelId(MODEL_FALLBACK_ID)
-    }
-    ensureAvailableModelIds(MODEL_FALLBACK_ID)
-  }
-
   function setPendingTurnRequest(threadId: string, request: PendingTurnRequest): void {
     pendingTurnRequestByThreadId.value = {
       ...pendingTurnRequestByThreadId.value,
@@ -1682,77 +1660,6 @@ export function useDesktopState() {
   function clearPendingTurnRequest(threadId: string): void {
     if (!pendingTurnRequestByThreadId.value[threadId]) return
     pendingTurnRequestByThreadId.value = omitKey(pendingTurnRequestByThreadId.value, threadId)
-  }
-
-
-
-  async function retryPendingTurnWithFallback(threadId: string): Promise<void> {
-    if (fallbackRetryInFlightThreadIds.has(threadId)) return
-    const pending = pendingTurnRequestByThreadId.value[threadId]
-    if (!pending || pending.fallbackRetried) return
-
-    fallbackRetryInFlightThreadIds.add(threadId)
-    setPendingTurnRequest(threadId, {
-      ...pending,
-      fallbackRetried: true,
-    })
-
-    try {
-      await applyFallbackModelSelection(threadId)
-      // Remove the failed user turn before replaying on fallback model to avoid duplicated user messages.
-      try {
-        const rolledBackMessages = await rollbackThread(threadId, 1)
-        setPersistedMessagesForThread(threadId, rolledBackMessages)
-        clearLivePlansForThread(threadId)
-        setLiveAgentMessagesForThread(threadId, [])
-        clearLiveReasoningForThread(threadId)
-        if (liveCommandsByThreadId.value[threadId]) {
-          liveCommandsByThreadId.value = omitKey(liveCommandsByThreadId.value, threadId)
-        }
-      } catch {
-        // If rollback fails, continue with retry rather than dropping the turn.
-      }
-      setTurnErrorForThread(threadId, null)
-      error.value = ''
-      setTurnSummaryForThread(threadId, null)
-      setTurnActivityForThread(threadId, {
-        label: 'Thinking',
-        details: buildPendingTurnDetails(MODEL_FALLBACK_ID, pending.effort, pending.collaborationMode),
-      })
-      setThreadInProgress(threadId, true)
-
-      if (resumedThreadById.value[threadId] !== true) {
-        await resumeThread(threadId)
-      }
-
-      await startThreadTurn(
-        threadId,
-        pending.text,
-        pending.imageUrls,
-        MODEL_FALLBACK_ID,
-        pending.effort || undefined,
-        pending.skills.length > 0 ? pending.skills : undefined,
-        pending.fileAttachments,
-        pending.collaborationMode,
-      )
-
-      resumedThreadById.value = {
-        ...resumedThreadById.value,
-        [threadId]: true,
-      }
-
-      scheduleRateLimitRefresh()
-      pendingThreadMessageRefresh.add(threadId)
-      await syncFromNotifications()
-    } catch (unknownError) {
-      const errorMessage = unknownError instanceof Error ? unknownError.message : 'Unknown application error'
-      setTurnErrorForThread(threadId, errorMessage)
-      error.value = errorMessage
-      setThreadInProgress(threadId, false)
-      setTurnActivityForThread(threadId, null)
-    } finally {
-      fallbackRetryInFlightThreadIds.delete(threadId)
-    }
   }
 
   function setSelectedReasoningEffort(effort: ReasoningEffort | ''): void {
@@ -3576,15 +3483,7 @@ export function useDesktopState() {
 
     const completedTurn = readTurnCompletedInfo(notification)
     const turnErrorMessage = readTurnErrorMessage(notification)
-    const completedThreadId = completedTurn?.threadId ?? extractThreadIdFromNotification(notification)
-    const completedThreadModelId = completedThreadId ? readModelIdForThread(completedThreadId) : ''
-    const shouldRetryWithFallback =
-      Boolean(completedThreadId) &&
-      Boolean(turnErrorMessage) &&
-      completedThreadModelId !== MODEL_FALLBACK_ID &&
-      isUnsupportedChatGptModelError(new Error(turnErrorMessage))
     if (completedTurn) {
-      const pendingTurnRequest = pendingTurnRequestByThreadId.value[completedTurn.threadId]
       const startedTurnState = pendingTurnStartsById.get(completedTurn.turnId)
       if (startedTurnState) {
         pendingTurnStartsById.delete(completedTurn.turnId)
@@ -3609,10 +3508,8 @@ export function useDesktopState() {
       setThreadInProgress(completedTurn.threadId, false)
       setTurnActivityForThread(completedTurn.threadId, null)
       markThreadUnreadByEvent(completedTurn.threadId)
-      if (!shouldRetryWithFallback) {
-        clearPendingTurnRequest(completedTurn.threadId)
-        scheduleQueueStateRefresh(completedTurn.threadId)
-      }
+      clearPendingTurnRequest(completedTurn.threadId)
+      scheduleQueueStateRefresh(completedTurn.threadId)
     }
 
     if (turnErrorMessage) {
@@ -3621,29 +3518,18 @@ export function useDesktopState() {
         setTurnErrorForThread(failedThreadId, turnErrorMessage)
       }
       error.value = turnErrorMessage
-      if (failedThreadId && shouldRetryWithFallback) {
-        void retryPendingTurnWithFallback(failedThreadId)
-      }
     } else if (completedTurn) {
       setTurnErrorForThread(completedTurn.threadId, null)
     }
 
     if (notificationErrorState) {
       const errorThreadId = notificationThreadId
-      const errorThreadModelId = errorThreadId ? readModelIdForThread(errorThreadId) : selectedModelId.value.trim()
       if (errorThreadId) {
         setTurnErrorForThread(errorThreadId, notificationErrorState.message, {
           transient: notificationErrorState.transient,
         })
       }
       error.value = notificationErrorState.message
-      if (errorThreadModelId !== MODEL_FALLBACK_ID && isUnsupportedChatGptModelError(new Error(notificationErrorState.message))) {
-        if (errorThreadId) {
-          void retryPendingTurnWithFallback(errorThreadId)
-        } else {
-          void applyFallbackModelSelection()
-        }
-      }
     }
 
     const planUpdate = readPlanUpdate(notification)
@@ -3764,10 +3650,8 @@ export function useDesktopState() {
         setThreadInProgress(completedThreadId, false)
         setTurnActivityForThread(completedThreadId, null)
         markThreadUnreadByEvent(completedThreadId)
-        if (!shouldRetryWithFallback) {
-          clearPendingTurnRequest(completedThreadId)
-          scheduleQueueStateRefresh(completedThreadId)
-        }
+        clearPendingTurnRequest(completedThreadId)
+        scheduleQueueStateRefresh(completedThreadId)
       }
     }
 
@@ -4635,22 +4519,10 @@ export function useDesktopState() {
     let threadId = ''
 
     try {
-      try {
-        const startedThread = await startThread(targetCwd || undefined, selectedModel || undefined)
-        threadId = startedThread.threadId
-        setThreadModelId(threadId, resolveSelectedThreadModel(selectedModel, startedThread.model))
-        setSelectedCollaborationModeForThread(threadId, selectedMode)
-      } catch (unknownError) {
-        if (selectedModel && selectedModel !== MODEL_FALLBACK_ID && isUnsupportedChatGptModelError(unknownError)) {
-          await applyFallbackModelSelection()
-          const fallbackThread = await startThread(targetCwd || undefined, MODEL_FALLBACK_ID)
-          threadId = fallbackThread.threadId
-          setThreadModelId(threadId, fallbackThread.model)
-          setSelectedCollaborationModeForThread(threadId, selectedMode)
-        } else {
-          throw unknownError
-        }
-      }
+      const startedThread = await startThread(targetCwd || undefined, selectedModel || undefined)
+      threadId = startedThread.threadId
+      setThreadModelId(threadId, resolveSelectedThreadModel(selectedModel, startedThread.model))
+      setSelectedCollaborationModeForThread(threadId, selectedMode)
       if (!threadId) return ''
 
       insertOptimisticThread(threadId, targetCwd, nextText || '[Image]')
@@ -4742,7 +4614,6 @@ export function useDesktopState() {
       fileAttachments: normalizedFileAttachments,
       effort: reasoningEffort,
       collaborationMode,
-      fallbackRetried: false,
     })
 
     try {
@@ -4754,44 +4625,16 @@ export function useDesktopState() {
       }
       const modelId = modelIdBeforeResume || readModelIdForThread(threadId)
 
-      let startedTurnId = ''
-      try {
-        startedTurnId = await startThreadTurn(
-          threadId,
-          nextText,
-          normalizedImageUrls,
-          modelId || undefined,
-          reasoningEffort || undefined,
-          skills.length > 0 ? skills : undefined,
-          fileAttachments,
-          collaborationMode,
-        )
-      } catch (unknownError) {
-        if (modelId && modelId !== MODEL_FALLBACK_ID && isUnsupportedChatGptModelError(unknownError)) {
-          await applyFallbackModelSelection(threadId)
-          setPendingTurnRequest(threadId, {
-            text: normalizedText,
-            imageUrls: [...normalizedImageUrls],
-            skills: normalizedSkills,
-            fileAttachments: normalizedFileAttachments,
-            effort: reasoningEffort,
-            collaborationMode,
-            fallbackRetried: true,
-          })
-          startedTurnId = await startThreadTurn(
-            threadId,
-            nextText,
-            normalizedImageUrls,
-            MODEL_FALLBACK_ID,
-            reasoningEffort || undefined,
-            skills.length > 0 ? skills : undefined,
-            fileAttachments,
-            collaborationMode,
-          )
-        } else {
-          throw unknownError
-        }
-      }
+      const startedTurnId = await startThreadTurn(
+        threadId,
+        nextText,
+        normalizedImageUrls,
+        modelId || undefined,
+        reasoningEffort || undefined,
+        skills.length > 0 ? skills : undefined,
+        fileAttachments,
+        collaborationMode,
+      )
 
       if (startedTurnId) {
         activeTurnIdByThreadId.value = {
