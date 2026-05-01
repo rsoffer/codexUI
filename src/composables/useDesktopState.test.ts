@@ -4,6 +4,7 @@ import {
   collectWorkspaceRootPathsForProjectRemoval,
   filterGroupsByWorkspaceRoots,
   findAdjacentThreadId,
+  resolveSelectedThreadModel,
 } from './useDesktopState'
 import type { UiProjectGroup } from '../types/codex'
 import type { WorkspaceRootsState } from '../api/codexGateway'
@@ -281,5 +282,15 @@ describe('findAdjacentThreadId', () => {
 
   it('returns no fallback when there is no adjacent thread', () => {
     expect(findAdjacentThreadId([thread('selected-thread', '/tmp/project')], 'selected-thread')).toBe('')
+  })
+})
+
+describe('resolveSelectedThreadModel', () => {
+  it('keeps the user-selected model when the server reports a different thread model', () => {
+    expect(resolveSelectedThreadModel('gpt-5.5', 'gpt-5.4-mini')).toBe('gpt-5.5')
+  })
+
+  it('uses the server model when there is no selected model to preserve', () => {
+    expect(resolveSelectedThreadModel('', 'gpt-5.4-mini')).toBe('gpt-5.4-mini')
   })
 })

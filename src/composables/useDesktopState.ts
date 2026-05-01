@@ -218,6 +218,13 @@ function readSelectedModel(
   return normalizeStoredModelId(state[NEW_THREAD_COLLABORATION_MODE_CONTEXT])
 }
 
+export function resolveSelectedThreadModel(
+  selectedModelId: string,
+  serverModelId: string,
+): string {
+  return normalizeStoredModelId(selectedModelId) || normalizeStoredModelId(serverModelId)
+}
+
 function saveSelectedModelMap(state: Record<string, string>): void {
   if (typeof window === 'undefined') return
   try {
@@ -4127,7 +4134,10 @@ export function useDesktopState() {
       const detail = resumedThread ?? await getThreadDetail(threadId)
 
       if (resumedThread) {
-        setThreadModelId(threadId, resumedThread.model)
+        setThreadModelId(
+          threadId,
+          resolveSelectedThreadModel(readModelIdForThread(threadId), resumedThread.model),
+        )
         resumedThreadById.value = {
           ...resumedThreadById.value,
           [threadId]: true,
@@ -4342,7 +4352,7 @@ export function useDesktopState() {
       if (!nextThreadId) return ''
 
       insertOptimisticThread(nextThreadId, sourceCwd, sourceTitle)
-      setThreadModelId(nextThreadId, forkedThread.model)
+      setThreadModelId(nextThreadId, resolveSelectedThreadModel(selectedModel, forkedThread.model))
       resumedThreadById.value = {
         ...resumedThreadById.value,
         [nextThreadId]: true,
@@ -4597,7 +4607,7 @@ export function useDesktopState() {
       try {
         const startedThread = await startThread(targetCwd || undefined, selectedModel || undefined)
         threadId = startedThread.threadId
-        setThreadModelId(threadId, startedThread.model)
+        setThreadModelId(threadId, resolveSelectedThreadModel(selectedModel, startedThread.model))
         setSelectedCollaborationModeForThread(threadId, selectedMode)
       } catch (unknownError) {
         if (selectedModel && selectedModel !== MODEL_FALLBACK_ID && isUnsupportedChatGptModelError(unknownError)) {
